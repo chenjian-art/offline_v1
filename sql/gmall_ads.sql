@@ -1,41 +1,56 @@
 use gmall;
+set hive.exec.mode.local.auto = true;
 
-DROP TABLE ads_cjje;
-CREATE EXTERNAL TABLE ads_cjje(
-                               `id` int COMMENT '编号',
-                               `total_amount` decimal(16,2) COMMENT '总金额',
-                               `order_status` string COMMENT '订单状态',
-                               `user_id` int COMMENT '用户id',
-                               `payment_way` string COMMENT '订单备注',
-                               `out_trade_no` string COMMENT '订单交易编号（第三方支付用)',
-                               `create_time` string COMMENT '创建时间',
-                               `operate_time` string COMMENT '操作时间'
-) COMMENT '订单表'
-partitioned by (dt string)
-row format delimited fields terminated by "\t"
-location "/warehouse/gmall/ads/ads_cjje"
-tblproperties (
+
+DROP TABLE ads_zhuanhuan;
+CREATE EXTERNAL TABLE ads_zhuanhuan
+(
+    `amount` decimal(16, 2) COMMENT '转化率'
+) COMMENT '转化率'
+    location "/warehouse/gmall/ads/ads_zhuanhuan"
+    tblproperties (
         'hive.exec.compress.output' = 'true',
         'mapreduce.output.fileoutputformat.compress' = 'true',
         'mapreduce.output.fileoutputformat.compress.codec' = 'org.apache.hadoop.io.compress.GzipCodec'
-    );
-select
+        );
 
-    sum(if(order_status="1001",dod.order_price,0)),
-    sum(if(order_status="1002",dod.order_price,0)),
-    sum(if(order_status="1003",dod.order_price,0)),
-    sum(if(order_status="1004",dod.order_price,0)),
-    sum(if(order_status="1005",dod.order_price,0))
-from dwd_order_info doi
-left join dwd_order_detail dod  on doi.id = dod.order_id;
+set hive.support.concurrency=false;
+set hive.auto.convert.join= false;
 
 
+select t.c / t2.s
+from (select order_status,
+             count(*) as c
+      from dwd_order_info doi
+               left join dwd_order_detail dod on doi.id = dod.order_id
+      group by order_status) t
+         left join (select count(*) as s
+                    from dwd_order_info) t2;
 
-select t1 / t2
-from (select count(*)
-      from dwd_order_detail) t1
-         left join (select count(*) as cs
-                    from dwd_sku_info dsi
-                             left join dwd_order_detail dod on dsi.id = dod.sku_id
-                    group by dsi.tm_id
-                    having cs >= 2) t2;
+
+
+DROP TABLE ads_fugolv;
+CREATE EXTERNAL TABLE ads_fugolv
+(
+    `tm_id`  int COMMENT '品牌(冗余)',
+    `amount` decimal(16, 2) COMMENT '复购率',
+    `time`   string COMMENT '日期'
+) COMMENT '转化率'
+    location "/warehouse/gmall/ads/ads_fugolv"
+    tblproperties (
+        'hive.exec.compress.output' = 'true',
+        'mapreduce.output.fileoutputformat.compress' = 'true',
+        'mapreduce.output.fileoutputformat.compress.codec' = 'org.apache.hadoop.io.compress.GzipCodec'
+        );
+select * from ads_fugolv;
+
+-- insert into ads_fugolv
+select t.tm_id, t.c / t1.s*100, t1.time
+from (select dsi.tm_id, count(*) as c
+      from dwd_order_detail dod
+               left join dwd_sku_info dsi on dod.sku_id = dsi.id
+      group by dsi.tm_id
+      having c >= 2) t
+         left join (select substr(dt, 1, 7) as time, count(*) as s
+                    from ods_order_detail
+                    group by substr(dt, 1, 7)) t1;
